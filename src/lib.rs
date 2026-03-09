@@ -64,6 +64,8 @@ pub mod backend;
 pub mod store;
 #[cfg(feature = "postgres")]
 pub mod pg;
+#[cfg(feature = "sqlx-sqlite")]
+pub mod sqlite;
 #[cfg(feature = "sqlite")]
 pub mod storage;
 pub mod types;

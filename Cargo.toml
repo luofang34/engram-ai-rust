@@ -15,7 +15,7 @@ default = []
 sqlite = ["rusqlite"]
 wasm = ["getrandom/js", "chrono/wasmbind", "uuid/js"]
 postgres = ["sqlx/runtime-tokio", "sqlx/postgres", "tokio", "async-trait"]
-sqlx-sqlite = ["sqlx/runtime-tokio", "sqlx/sqlite", "tokio"]
+sqlx-sqlite = ["sqlx/runtime-tokio", "sqlx/sqlite", "tokio", "async-trait"]
 
 [dependencies]
 # Optional SQLite backend
