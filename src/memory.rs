@@ -114,17 +114,65 @@ impl Memory {
         context: Option<Vec<String>>,
         min_confidence: Option<f64>,
     ) -> Result<Vec<RecallResult>, Box<dyn std::error::Error>> {
+        self.recall_hybrid(query, limit, context, min_confidence, None)
+    }
+
+    /// Recall with optional embedding vector for hybrid semantic+keyword+cognitive search.
+    ///
+    /// When `query_embedding` is provided, candidates come from both FTS and vector search,
+    /// and the final score blends ACT-R activation with cosine similarity.
+    ///
+    /// Score = α·activation_norm + β·semantic_similarity + γ·keyword_match
+    /// Default weights: α=0.5, β=0.35, γ=0.15
+    pub fn recall_hybrid(
+        &mut self,
+        query: &str,
+        limit: usize,
+        context: Option<Vec<String>>,
+        min_confidence: Option<f64>,
+        query_embedding: Option<&[f32]>,
+    ) -> Result<Vec<RecallResult>, Box<dyn std::error::Error>> {
         let now = Utc::now();
         let context = context.unwrap_or_default();
         let min_conf = min_confidence.unwrap_or(0.0);
 
         // Get candidate memories via FTS
-        let candidates = self.storage.search_fts(query, limit * 3)?;
+        let fts_candidates = self.storage.search_fts(query, limit * 3)?;
 
-        // Score each candidate with ACT-R activation
+        // Get candidate memories via vector search (if embedding provided)
+        let vec_candidates = if let Some(emb) = query_embedding {
+            self.storage.search_vector(emb, limit * 3, 0.1)
+                .into_iter()
+                .map(|(id, score)| (id, score))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Build semantic score map from vector results
+        let semantic_scores: HashMap<String, f32> = vec_candidates.into_iter().collect();
+
+        // Merge candidate sets (union by id)
+        let mut seen = std::collections::HashSet::new();
+        let mut candidates = Vec::new();
+        for r in fts_candidates {
+            seen.insert(r.id.clone());
+            candidates.push(r);
+        }
+        // Add vector-only candidates
+        for (id, _) in &semantic_scores {
+            if !seen.contains(id) {
+                if let Some(r) = self.storage.get(id)? {
+                    candidates.push(r);
+                }
+            }
+        }
+
+        // Score each candidate with hybrid: ACT-R + semantic + keyword
+        let has_embeddings = query_embedding.is_some();
         let mut scored: Vec<_> = candidates
             .into_iter()
-            .map(|record| {
+            .filter_map(|record| {
                 let activation = retrieval_activation(
                     &record,
                     &context,
@@ -134,12 +182,26 @@ impl Memory {
                     self.config.importance_weight,
                     self.config.contradiction_penalty,
                 );
-                (record, activation)
+                if activation == f64::NEG_INFINITY {
+                    return None;
+                }
+
+                let sem_score = semantic_scores.get(&record.id).copied().unwrap_or(0.0) as f64;
+
+                // Blend scores when we have embeddings
+                let final_score = if has_embeddings {
+                    // α=0.5 (cognitive), β=0.35 (semantic), γ=0.15 (keyword/activation overlap)
+                    let act_norm = 1.0 / (1.0 + (-activation).exp()); // sigmoid normalize
+                    0.5 * act_norm + 0.35 * sem_score + 0.15 * act_norm * sem_score
+                } else {
+                    activation
+                };
+
+                Some((record, final_score))
             })
-            .filter(|(_, act)| *act > f64::NEG_INFINITY)
             .collect();
 
-        // Sort by activation descending
+        // Sort by score descending
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
         // Take top-k and compute confidence
