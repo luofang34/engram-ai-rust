@@ -6,20 +6,16 @@ rust-version = "1.75"
 description = "Neuroscience-grounded memory system for AI agents. ACT-R activation, Hebbian learning, Ebbinghaus forgetting, cognitive consolidation."
 authors = ["Toni Tang <tonitangpotato@gmail.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/tonitangpotato/engram-ai-rust"
+repository = "https://github.com/luofang34/engram-ai-rust"
 keywords = ["ai", "memory", "cognitive-science", "agent", "neuroscience"]
 categories = ["science", "database", "algorithms"]
 
 [features]
 default = []
-sqlite = ["rusqlite"]
 wasm = ["getrandom/js", "chrono/wasmbind", "uuid/js"]
 postgres = ["sqlx/runtime-tokio", "sqlx/postgres", "tokio", "async-trait"]
-sqlx-sqlite = ["sqlx/runtime-tokio", "sqlx/sqlite", "tokio", "async-trait"]
 
 [dependencies]
-# Optional SQLite backend
-rusqlite = { version = "0.32", features = ["bundled", "uuid"], optional = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
