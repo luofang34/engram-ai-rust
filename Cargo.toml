@@ -13,6 +13,7 @@ categories = ["science", "database", "algorithms"]
 [features]
 default = []
 sqlite = ["rusqlite"]
+wasm = ["getrandom/js", "chrono/wasmbind", "uuid/js"]
 
 [dependencies]
 # Optional SQLite backend
@@ -38,6 +39,9 @@ log = "0.4"
 
 # Random for interleaved replay
 rand = "0.8"
+
+# WASM support
+getrandom = { version = "0.2", optional = true }
 
 [dev-dependencies]
 env_logger = "0.11"
