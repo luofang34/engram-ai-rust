@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::config::MemoryConfig;
 use crate::models::{effective_strength, retrieval_activation, run_consolidation_cycle};
-use crate::storage::Storage;
+use crate::store::MemoryStore;
 use crate::types::{LayerStats, MemoryLayer, MemoryRecord, MemoryStats, MemoryType, RecallResult, TypeStats};
 
 /// Main interface to the Engram memory system.
@@ -14,7 +14,7 @@ use crate::types::{LayerStats, MemoryLayer, MemoryRecord, MemoryStats, MemoryTyp
 /// Wraps the neuroscience math models behind a clean API.
 /// All complexity is hidden — you just add, recall, and consolidate.
 pub struct Memory {
-    storage: Storage,
+    storage: MemoryStore,
     config: MemoryConfig,
     created_at: chrono::DateTime<Utc>,
 }
@@ -28,7 +28,11 @@ impl Memory {
     ///           Use `:memory:` for in-memory (non-persistent) operation.
     /// * `config` - MemoryConfig with tunable parameters. None = literature defaults.
     pub fn new(path: &str, config: Option<MemoryConfig>) -> Result<Self, Box<dyn std::error::Error>> {
-        let storage = Storage::new(path)?;
+        let storage = if path == ":memory:" {
+            MemoryStore::new::<std::path::PathBuf>(None)?
+        } else {
+            MemoryStore::new(Some(std::path::PathBuf::from(path)))?
+        };
         let config = config.unwrap_or_default();
         let created_at = Utc::now();
 
@@ -80,6 +84,7 @@ impl Memory {
             contradicts: None,
             contradicted_by: None,
             metadata,
+            embedding: None,
         };
 
         self.storage.add(&record)?;

@@ -18,7 +18,7 @@ use chrono::Utc;
 use rand::seq::SliceRandom;
 
 use crate::config::MemoryConfig;
-use crate::storage::Storage;
+use crate::store::MemoryStore;
 use crate::types::{MemoryLayer, MemoryRecord};
 
 /// Apply time-based decay to both memory traces.
@@ -70,7 +70,7 @@ pub fn consolidate_single(record: &mut MemoryRecord, dt_days: f64, config: &Memo
 /// 2. Interleaved replay: also touch some archive (L4) memories
 ///    (prevents catastrophic forgetting)
 /// 3. Promote/demote memories between layers based on strength
-pub fn run_consolidation_cycle(storage: &mut Storage, dt_days: f64, config: &MemoryConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_consolidation_cycle(storage: &mut MemoryStore, dt_days: f64, config: &MemoryConfig) -> Result<(), Box<dyn std::error::Error>> {
     let mut all_memories = storage.all()?;
     let mut rng = rand::thread_rng();
 

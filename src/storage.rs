@@ -1,3 +1,4 @@
+#![cfg(feature = "sqlite")]
 //! SQLite storage backend for Engram.
 
 use chrono::{DateTime, Utc};

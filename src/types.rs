@@ -130,6 +130,10 @@ pub struct MemoryRecord {
     
     /// Optional structured metadata (JSON)
     pub metadata: Option<serde_json::Value>,
+
+    /// Optional embedding vector for semantic search
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<Vec<f32>>,
 }
 
 impl MemoryRecord {

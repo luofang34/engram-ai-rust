@@ -6,7 +6,7 @@
 //! These links create an associative network independent of explicit entity
 //! tagging — purely emergent from usage patterns.
 
-use crate::storage::Storage;
+use crate::store::MemoryStore;
 
 /// Record co-activation for a set of memory IDs.
 ///
@@ -14,7 +14,7 @@ use crate::storage::Storage;
 /// each pair gets their coactivation_count incremented. When the count
 /// reaches the threshold, a Hebbian link is automatically formed.
 pub fn record_coactivation(
-    storage: &mut Storage,
+    storage: &mut MemoryStore,
     memory_ids: &[String],
     threshold: i32,
 ) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {

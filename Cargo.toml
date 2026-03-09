@@ -10,13 +10,18 @@ repository = "https://github.com/tonitangpotato/engram-ai-rust"
 keywords = ["ai", "memory", "cognitive-science", "agent", "neuroscience"]
 categories = ["science", "database", "algorithms"]
 
+[features]
+default = []
+sqlite = ["rusqlite"]
+
 [dependencies]
-# Core database
-rusqlite = { version = "0.32", features = ["bundled", "uuid"] }
+# Optional SQLite backend
+rusqlite = { version = "0.32", features = ["bundled", "uuid"], optional = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+bincode = "1.3"
 
 # UUID generation
 uuid = { version = "1.10", features = ["v4", "serde"] }

@@ -17,7 +17,7 @@
 //! ```rust,no_run
 //! use engramai::{Memory, MemoryType};
 //!
-//! let mut mem = Memory::new("./agent.db", None)?;
+//! let mut mem = Memory::new("./agent.bin", None)?;
 //!
 //! // Store memories
 //! mem.add(
@@ -60,6 +60,8 @@
 pub mod config;
 pub mod memory;
 pub mod models;
+pub mod store;
+#[cfg(feature = "sqlite")]
 pub mod storage;
 pub mod types;
 
