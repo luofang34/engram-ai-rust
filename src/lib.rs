@@ -60,7 +60,10 @@
 pub mod config;
 pub mod memory;
 pub mod models;
+pub mod backend;
 pub mod store;
+#[cfg(feature = "postgres")]
+pub mod pg;
 #[cfg(feature = "sqlite")]
 pub mod storage;
 pub mod types;

@@ -14,6 +14,8 @@ categories = ["science", "database", "algorithms"]
 default = []
 sqlite = ["rusqlite"]
 wasm = ["getrandom/js", "chrono/wasmbind", "uuid/js"]
+postgres = ["sqlx/runtime-tokio", "sqlx/postgres", "tokio", "async-trait"]
+sqlx-sqlite = ["sqlx/runtime-tokio", "sqlx/sqlite", "tokio"]
 
 [dependencies]
 # Optional SQLite backend
@@ -42,6 +44,12 @@ rand = "0.8"
 
 # WASM support
 getrandom = { version = "0.2", optional = true }
+
+# SQLx backends (optional)
+sqlx = { version = "0.8", features = ["chrono", "uuid", "json"], optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
+async-trait = { version = "0.1", optional = true }
+
 
 [dev-dependencies]
 env_logger = "0.11"
