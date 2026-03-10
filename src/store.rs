@@ -230,6 +230,14 @@ impl MemoryStore {
         Ok(pruned)
     }
 
+    /// Export all Hebbian links for sync.
+    pub fn export_hebbian_links(&self) -> Vec<(String, String, f64)> {
+        self.hebbian_links
+            .iter()
+            .map(|((a, b), s)| (a.clone(), b.clone(), *s))
+            .collect()
+    }
+
     /// Semantic search using cosine similarity against stored embeddings.
     pub fn search_vector(
         &self,

@@ -61,11 +61,14 @@ pub mod config;
 pub mod memory;
 pub mod models;
 pub mod backend;
+pub mod retrieval;
 pub mod store;
+pub mod sync;
 #[cfg(feature = "postgres")]
 pub mod pg;
 pub mod types;
 
 pub use config::MemoryConfig;
 pub use memory::Memory;
+pub use retrieval::RetrievalConfig;
 pub use types::{MemoryLayer, MemoryRecord, MemoryStats, MemoryType, RecallResult};

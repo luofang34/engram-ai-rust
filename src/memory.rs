@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::config::MemoryConfig;
 use crate::models::{effective_strength, retrieval_activation, run_consolidation_cycle};
+use crate::retrieval::{self, RetrievalConfig};
 use crate::store::MemoryStore;
 use crate::types::{LayerStats, MemoryLayer, MemoryRecord, MemoryStats, MemoryType, RecallResult, TypeStats};
 
@@ -16,7 +17,11 @@ use crate::types::{LayerStats, MemoryLayer, MemoryRecord, MemoryStats, MemoryTyp
 pub struct Memory {
     storage: MemoryStore,
     config: MemoryConfig,
+    retrieval_config: RetrievalConfig,
     created_at: chrono::DateTime<Utc>,
+    /// Tracks per-memory retrieval outcomes for meta-learning.
+    /// Maps memory_id → (times_retrieved, times_rewarded_positive, times_rewarded_negative)
+    meta_stats: HashMap<String, (u64, u64, u64)>,
 }
 
 impl Memory {
@@ -24,7 +29,7 @@ impl Memory {
     ///
     /// # Arguments
     ///
-    /// * `path` - Path to SQLite database file. Created if it doesn't exist.
+    /// * `path` - Path to database file. Created if it doesn't exist.
     ///           Use `:memory:` for in-memory (non-persistent) operation.
     /// * `config` - MemoryConfig with tunable parameters. None = literature defaults.
     pub fn new(path: &str, config: Option<MemoryConfig>) -> Result<Self, Box<dyn std::error::Error>> {
@@ -39,8 +44,15 @@ impl Memory {
         Ok(Self {
             storage,
             config,
+            retrieval_config: RetrievalConfig::default(),
             created_at,
+            meta_stats: HashMap::new(),
         })
+    }
+
+    /// Set custom retrieval pipeline configuration.
+    pub fn set_retrieval_config(&mut self, config: RetrievalConfig) {
+        self.retrieval_config = config;
     }
 
     /// Store a new memory. Returns memory ID.
@@ -49,13 +61,7 @@ impl Memory {
     /// hippocampal trace) and core_strength=0.0 (no neocortical trace yet).
     /// Consolidation cycles will gradually transfer it to core.
     ///
-    /// # Arguments
-    ///
-    /// * `content` - The memory content (natural language)
-    /// * `memory_type` - Memory type classification
-    /// * `importance` - 0-1 importance score (None = auto from type)
-    /// * `source` - Source identifier (e.g., filename, conversation ID)
-    /// * `metadata` - Optional structured metadata (e.g., for causal memories)
+    /// Noise content (greetings, acknowledgments) is silently rejected.
     pub fn add(
         &mut self,
         content: &str,
@@ -64,6 +70,11 @@ impl Memory {
         source: Option<&str>,
         metadata: Option<serde_json::Value>,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        // Noise filter at ingest
+        if retrieval::is_noise(content) {
+            return Ok(String::new());
+        }
+
         let id = format!("{}", Uuid::new_v4())[..8].to_string();
         let importance = importance.unwrap_or_else(|| memory_type.default_importance());
 
@@ -91,22 +102,49 @@ impl Memory {
         Ok(id)
     }
 
-    /// Retrieve relevant memories using ACT-R activation-based retrieval.
-    ///
-    /// Unlike simple cosine similarity, this uses:
-    /// - Base-level activation (frequency × recency, power law)
-    /// - Spreading activation from context keywords
-    /// - Importance modulation (emotional memories are more accessible)
-    ///
-    /// Results include a confidence score (metacognitive monitoring)
-    /// that tells you how "trustworthy" each retrieval is.
-    ///
-    /// # Arguments
-    ///
-    /// * `query` - Natural language query
-    /// * `limit` - Maximum number of results
-    /// * `context` - Additional context keywords to boost relevant memories
-    /// * `min_confidence` - Minimum confidence threshold (0-1)
+    /// Store a memory with a pre-computed embedding vector.
+    pub fn add_with_embedding(
+        &mut self,
+        content: &str,
+        memory_type: MemoryType,
+        importance: Option<f64>,
+        source: Option<&str>,
+        metadata: Option<serde_json::Value>,
+        embedding: Vec<f32>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        if retrieval::is_noise(content) {
+            return Ok(String::new());
+        }
+
+        let id = format!("{}", Uuid::new_v4())[..8].to_string();
+        let importance = importance.unwrap_or_else(|| memory_type.default_importance());
+
+        let record = MemoryRecord {
+            id: id.clone(),
+            content: content.to_string(),
+            memory_type,
+            layer: MemoryLayer::Working,
+            created_at: Utc::now(),
+            access_times: vec![Utc::now()],
+            working_strength: 1.0,
+            core_strength: 0.0,
+            importance,
+            pinned: false,
+            consolidation_count: 0,
+            last_consolidated: None,
+            source: source.unwrap_or("").to_string(),
+            contradicts: None,
+            contradicted_by: None,
+            metadata,
+            embedding: Some(embedding),
+        };
+
+        self.storage.add(&record)?;
+        Ok(id)
+    }
+
+    /// Retrieve relevant memories using the full pipeline:
+    /// FTS + vector → RRF fusion → ACT-R cognitive scoring → MMR diversity.
     pub fn recall(
         &mut self,
         query: &str,
@@ -119,11 +157,11 @@ impl Memory {
 
     /// Recall with optional embedding vector for hybrid semantic+keyword+cognitive search.
     ///
-    /// When `query_embedding` is provided, candidates come from both FTS and vector search,
-    /// and the final score blends ACT-R activation with cosine similarity.
-    ///
-    /// Score = α·activation_norm + β·semantic_similarity + γ·keyword_match
-    /// Default weights: α=0.5, β=0.35, γ=0.15
+    /// Uses the full retrieval pipeline:
+    /// 1. Candidate generation (FTS + vector search)
+    /// 2. RRF fusion (merges ranked lists)
+    /// 3. Cognitive scoring (ACT-R activation blend)
+    /// 4. MMR diversity selection (suppresses near-duplicates)
     pub fn recall_hybrid(
         &mut self,
         query: &str,
@@ -136,45 +174,13 @@ impl Memory {
         let context = context.unwrap_or_default();
         let min_conf = min_confidence.unwrap_or(0.0);
 
-        // Get candidate memories via FTS
-        let fts_candidates = self.storage.search_fts(query, limit * 3)?;
-
-        // Get candidate memories via vector search (if embedding provided)
-        let vec_candidates = if let Some(emb) = query_embedding {
-            self.storage.search_vector(emb, limit * 3, 0.1)
-                .into_iter()
-                .map(|(id, score)| (id, score))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-
-        // Build semantic score map from vector results
-        let semantic_scores: HashMap<String, f32> = vec_candidates.into_iter().collect();
-
-        // Merge candidate sets (union by id)
-        let mut seen = std::collections::HashSet::new();
-        let mut candidates = Vec::new();
-        for r in fts_candidates {
-            seen.insert(r.id.clone());
-            candidates.push(r);
-        }
-        // Add vector-only candidates
-        for (id, _) in &semantic_scores {
-            if !seen.contains(id) {
-                if let Some(r) = self.storage.get(id)? {
-                    candidates.push(r);
-                }
-            }
-        }
-
-        // Score each candidate with hybrid: ACT-R + semantic + keyword
-        let has_embeddings = query_embedding.is_some();
-        let mut scored: Vec<_> = candidates
-            .into_iter()
+        // Pre-compute cognitive scores for all memories
+        let all = self.storage.all()?;
+        let cognitive_scores: HashMap<String, f64> = all
+            .iter()
             .filter_map(|record| {
                 let activation = retrieval_activation(
-                    &record,
+                    record,
                     &context,
                     now,
                     self.config.actr_decay,
@@ -183,38 +189,33 @@ impl Memory {
                     self.config.contradiction_penalty,
                 );
                 if activation == f64::NEG_INFINITY {
-                    return None;
-                }
-
-                let sem_score = semantic_scores.get(&record.id).copied().unwrap_or(0.0) as f64;
-
-                // Blend scores when we have embeddings
-                let final_score = if has_embeddings {
-                    // α=0.5 (cognitive), β=0.35 (semantic), γ=0.15 (keyword/activation overlap)
-                    let act_norm = 1.0 / (1.0 + (-activation).exp()); // sigmoid normalize
-                    0.5 * act_norm + 0.35 * sem_score + 0.15 * act_norm * sem_score
+                    None
                 } else {
-                    activation
-                };
-
-                Some((record, final_score))
+                    Some((record.id.clone(), activation))
+                }
             })
             .collect();
 
-        // Sort by score descending
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // Run the retrieval pipeline
+        let candidates = retrieval::retrieve(
+            &self.storage,
+            query,
+            limit,
+            query_embedding,
+            &cognitive_scores,
+            &self.retrieval_config,
+        )?;
 
-        // Take top-k and compute confidence
-        let results: Vec<_> = scored
+        // Convert to RecallResult with confidence
+        let results: Vec<RecallResult> = candidates
             .into_iter()
-            .take(limit)
-            .map(|(record, activation)| {
-                let confidence = self.compute_confidence(&record, activation);
+            .map(|cand| {
+                let confidence = self.compute_confidence(&cand.record, cand.score);
                 let confidence_label = confidence_label(confidence);
 
                 RecallResult {
-                    record,
-                    activation,
+                    record: cand.record,
+                    activation: cand.score,
                     confidence,
                     confidence_label,
                 }
@@ -225,6 +226,9 @@ impl Memory {
         // Record access for all retrieved memories (ACT-R learning)
         for result in &results {
             self.storage.record_access(&result.record.id)?;
+            // Meta-learning: track retrieval count
+            let entry = self.meta_stats.entry(result.record.id.clone()).or_insert((0, 0, 0));
+            entry.0 += 1;
         }
 
         // Hebbian learning: record co-activation
@@ -242,20 +246,13 @@ impl Memory {
 
     /// Run a consolidation cycle ("sleep replay").
     ///
-    /// This is the core of memory maintenance. Based on Murre & Chessa's
-    /// Memory Chain Model, it:
+    /// Based on Murre & Chessa's Memory Chain Model, it:
     ///
     /// 1. Decays working_strength (hippocampal traces fade)
     /// 2. Transfers knowledge to core_strength (neocortical consolidation)
     /// 3. Replays archived memories (prevents catastrophic forgetting)
     /// 4. Rebalances layers (promote strong → core, demote weak → archive)
-    ///
-    /// Call this periodically — once per "day" of agent operation,
-    /// or after significant learning sessions.
-    ///
-    /// # Arguments
-    ///
-    /// * `days` - Simulated time step in days (1.0 = one day of consolidation)
+    /// 5. Runs meta-learning importance adjustment
     pub fn consolidate(&mut self, days: f64) -> Result<(), Box<dyn std::error::Error>> {
         run_consolidation_cycle(&mut self.storage, days, &self.config)?;
 
@@ -264,14 +261,107 @@ impl Memory {
             self.storage.decay_hebbian_links(self.config.hebbian_decay)?;
         }
 
+        // Meta-learning: adjust importance based on actual utility
+        self.meta_learn()?;
+
         Ok(())
     }
 
-    /// Forget a specific memory or prune all below threshold.
+    /// Merge similar memories into distilled summaries.
     ///
-    /// If memory_id is given, removes that specific memory.
-    /// Otherwise, prunes all memories whose effective_strength
-    /// is below threshold (moves them to archive).
+    /// This is "consolidation as compression" — instead of just decaying,
+    /// find clusters of related memories and merge them.
+    ///
+    /// Takes an optional `merge_fn` that compresses multiple content strings
+    /// into one. If None, uses simple concatenation with dedup.
+    ///
+    /// Returns the number of merges performed.
+    pub fn compress(
+        &mut self,
+        similarity_threshold: f64,
+        merge_fn: Option<&dyn Fn(&[&str]) -> String>,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
+        let all = self.storage.all()?;
+        if all.len() < 2 {
+            return Ok(0);
+        }
+
+        let mut merged_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut merge_count = 0;
+
+        for record in &all {
+            if merged_ids.contains(&record.id) {
+                continue;
+            }
+
+            // Find Hebbian neighbors
+            let neighbors = self.storage.get_hebbian_neighbors(&record.id)?;
+            if neighbors.is_empty() {
+                continue;
+            }
+
+            // Check content similarity with neighbors
+            let mut cluster: Vec<&MemoryRecord> = vec![record];
+            for nid in &neighbors {
+                if merged_ids.contains(nid) {
+                    continue;
+                }
+                if let Some(neighbor) = all.iter().find(|r| r.id == *nid) {
+                    let sim = jaccard_similarity(&record.content, &neighbor.content);
+                    if sim >= similarity_threshold {
+                        cluster.push(neighbor);
+                    }
+                }
+            }
+
+            if cluster.len() < 2 {
+                continue;
+            }
+
+            // Merge the cluster
+            let contents: Vec<&str> = cluster.iter().map(|r| r.content.as_str()).collect();
+            let merged_content = match merge_fn {
+                Some(f) => f(&contents),
+                None => default_merge(&contents),
+            };
+
+            // Keep the strongest memory as the survivor
+            let survivor_idx = cluster.iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| {
+                    let sa = a.working_strength + a.core_strength;
+                    let sb = b.working_strength + b.core_strength;
+                    sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+
+            let survivor = cluster[survivor_idx];
+            let mut updated = survivor.clone();
+            updated.content = merged_content;
+            updated.importance = (updated.importance * 1.1).min(1.0);
+            for (i, r) in cluster.iter().enumerate() {
+                if i != survivor_idx {
+                    updated.core_strength += r.core_strength * 0.5;
+                    merged_ids.insert(r.id.clone());
+                }
+            }
+
+            self.storage.update(&updated)?;
+
+            for (i, r) in cluster.iter().enumerate() {
+                if i != survivor_idx {
+                    self.storage.delete(&r.id)?;
+                }
+            }
+
+            merge_count += 1;
+        }
+
+        Ok(merge_count)
+    }
+
+    /// Forget a specific memory or prune all below threshold.
     pub fn forget(
         &mut self,
         memory_id: Option<&str>,
@@ -282,7 +372,6 @@ impl Memory {
         if let Some(id) = memory_id {
             self.storage.delete(id)?;
         } else {
-            // Prune all weak memories
             let now = Utc::now();
             let all = self.storage.all()?;
             for record in all {
@@ -302,33 +391,32 @@ impl Memory {
     /// Process user feedback as a dopaminergic reward signal.
     ///
     /// Detects positive/negative sentiment and applies reward modulation
-    /// to recently accessed memories.
+    /// to recently accessed memories. Also updates meta-learning stats.
     pub fn reward(&mut self, feedback: &str, recent_n: usize) -> Result<(), Box<dyn std::error::Error>> {
         let polarity = detect_feedback_polarity(feedback);
 
         if polarity == 0.0 {
-            return Ok(()); // Neutral feedback
+            return Ok(());
         }
 
-        // Get recently accessed memories
         let all = self.storage.all()?;
-        let _now = Utc::now();
         let mut recent: Vec<_> = all
             .into_iter()
             .filter(|r| !r.access_times.is_empty())
             .collect();
         recent.sort_by_key(|r| std::cmp::Reverse(r.access_times.last().cloned()));
 
-        // Apply reward to top-N recent
         for mut record in recent.into_iter().take(recent_n) {
             if polarity > 0.0 {
-                // Positive feedback: boost working strength
                 record.working_strength += self.config.reward_magnitude * polarity;
                 record.working_strength = record.working_strength.min(2.0);
+                let entry = self.meta_stats.entry(record.id.clone()).or_insert((0, 0, 0));
+                entry.1 += 1;
             } else {
-                // Negative feedback: suppress working strength
-                record.working_strength *= 1.0 + polarity * 0.1; // polarity is negative
+                record.working_strength *= 1.0 + polarity * 0.1;
                 record.working_strength = record.working_strength.max(0.0);
+                let entry = self.meta_stats.entry(record.id.clone()).or_insert((0, 0, 0));
+                entry.2 += 1;
             }
             self.storage.update(&record)?;
         }
@@ -337,8 +425,6 @@ impl Memory {
     }
 
     /// Global synaptic downscaling — normalize all memory weights.
-    ///
-    /// Based on Tononi & Cirelli's Synaptic Homeostasis Hypothesis.
     pub fn downscale(&mut self, factor: Option<f64>) -> Result<usize, Box<dyn std::error::Error>> {
         let factor = factor.unwrap_or(self.config.downscale_factor);
         let all = self.storage.all()?;
@@ -453,12 +539,91 @@ impl Memory {
         Ok(self.storage.get_hebbian_neighbors(memory_id)?)
     }
 
+    /// Export all memories for sync (content-addressed snapshot).
+    pub fn export_snapshot(&self) -> Result<crate::sync::Snapshot, Box<dyn std::error::Error>> {
+        crate::sync::Snapshot::from_store(&self.storage)
+    }
+
+    /// Import and merge a remote snapshot (CRDT union merge).
+    pub fn import_snapshot(&mut self, snapshot: &crate::sync::Snapshot) -> Result<crate::sync::MergeReport, Box<dyn std::error::Error>> {
+        crate::sync::merge_snapshot(&mut self.storage, snapshot)
+    }
+
+    /// Meta-learning: adjust importance based on retrieval/reward patterns.
+    ///
+    /// Memories that are frequently retrieved and positively rewarded
+    /// get their importance boosted. Memories retrieved but negatively
+    /// rewarded get suppressed.
+    fn meta_learn(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let updates: Vec<(String, f64)> = self.meta_stats
+            .iter()
+            .filter_map(|(id, (retrieved, positive, negative))| {
+                if *retrieved < 2 {
+                    return None;
+                }
+                let total_feedback = *positive + *negative;
+                if total_feedback == 0 {
+                    return None;
+                }
+
+                let reward_ratio = *positive as f64 / total_feedback as f64;
+                let adjustment = (reward_ratio - 0.5) * 0.05;
+                Some((id.clone(), adjustment))
+            })
+            .collect();
+
+        for (id, adjustment) in updates {
+            if let Some(mut record) = self.storage.get(&id)? {
+                record.importance = (record.importance + adjustment).clamp(0.05, 1.0);
+                self.storage.update(&record)?;
+            }
+        }
+
+        Ok(())
+    }
+
     fn compute_confidence(&self, record: &MemoryRecord, activation: f64) -> f64 {
-        // Simple confidence heuristic: normalize activation + importance
-        let normalized_activation = (activation + 10.0) / 20.0; // Rough normalization
+        let normalized_activation = (activation + 10.0) / 20.0;
         let confidence = (normalized_activation.max(0.0).min(1.0) * 0.7) + (record.importance * 0.3);
         confidence.max(0.0).min(1.0)
     }
+}
+
+/// Default merge function: deduplicate sentences, concatenate.
+fn default_merge(contents: &[&str]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut merged = Vec::new();
+
+    for content in contents {
+        for sentence in content.split(|c: char| c == '.' || c == ';' || c == '\n') {
+            let trimmed = sentence.trim();
+            if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
+                merged.push(trimmed);
+            }
+        }
+    }
+
+    merged.join(". ")
+}
+
+/// Jaccard similarity between two content strings (word-level).
+fn jaccard_similarity(a: &str, b: &str) -> f64 {
+    let words_a: std::collections::HashSet<&str> = a.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() >= 2)
+        .collect();
+    let words_b: std::collections::HashSet<&str> = b.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() >= 2)
+        .collect();
+
+    if words_a.is_empty() || words_b.is_empty() {
+        return 0.0;
+    }
+
+    let intersection = words_a.intersection(&words_b).count() as f64;
+    let union = words_a.union(&words_b).count() as f64;
+    intersection / union
 }
 
 fn confidence_label(confidence: f64) -> String {

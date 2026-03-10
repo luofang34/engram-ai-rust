@@ -1,16 +1,16 @@
-//! Basic usage example demonstrating IronClaw-Engram's core API.
+//! Basic usage example demonstrating Engram AI's core API.
 
 use engramai::{Memory, MemoryType};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    println!("=== IronClaw-Engram Basic Usage Demo ===\n");
+    println!("=== Engram AI Demo ===\n");
 
     // Create in-memory database
     let mut mem = Memory::new(":memory:", None)?;
 
-    // Add memories
+    // --- Add memories ---
     println!("Adding memories...");
     let _id1 = mem.add(
         "potato prefers action over discussion",
@@ -48,14 +48,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
     )?;
 
-    println!("  Added 5 memories\n");
+    // Noise is filtered automatically
+    let noise_id = mem.add("ok", MemoryType::Factual, None, None, None)?;
+    assert!(noise_id.is_empty(), "Noise should be filtered");
+    println!("  Added 5 memories (noise filtered automatically)\n");
 
-    // Recall
+    // --- Recall with RRF + MMR pipeline ---
     println!("--- Recall: 'what does potato like?' ---");
     let results = mem.recall("what does potato like?", 3, None, None)?;
     for r in &results {
         println!(
-            "  [{:10}] conf={:.2} act={:.2} | {}",
+            "  [{:10}] conf={:.2} score={:.2} | {}",
             r.confidence_label,
             r.confidence,
             r.activation,
@@ -68,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let results = mem.recall("moltbook API", 3, None, None)?;
     for r in &results {
         println!(
-            "  [{:10}] conf={:.2} act={:.2} | {}",
+            "  [{:10}] conf={:.2} score={:.2} | {}",
             r.confidence_label,
             r.confidence,
             r.activation,
@@ -76,22 +79,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Reward
+    // --- Reward + Meta-learning ---
     println!("\n--- Applying positive feedback ---");
     mem.reward("good job, that's exactly right!", 3)?;
 
-    // Consolidate
+    // --- Consolidate ---
     println!("--- Running consolidation (3 days) ---");
     for day in 1..=3 {
         mem.consolidate(1.0)?;
-        println!("  Day {}/3 complete", day);
+        println!("  Day {}/3 complete (meta-learning active)", day);
     }
 
     // Pin emotional memory
     mem.pin(&id4)?;
     println!("\n--- Pinned emotional memory ---");
 
-    // Stats
+    // --- Cross-device sync ---
+    println!("\n--- Cross-device sync demo ---");
+    let mut device_b = Memory::new(":memory:", None)?;
+    device_b.add("Remote device note", MemoryType::Episodic, Some(0.4), None, None)?;
+
+    // Export from main, import into device B
+    let snapshot = mem.export_snapshot()?;
+    let bytes = snapshot.to_bytes()?;
+    println!("  Snapshot: {} bytes ({} memories)", bytes.len(), snapshot.memories.len());
+
+    let restored = engramai::sync::Snapshot::from_bytes(&bytes)?;
+    let report = device_b.import_snapshot(&restored)?;
+    println!("  Merged: {} added, {} updated, {} skipped", report.added, report.updated, report.skipped);
+
+    let stats_b = device_b.stats()?;
+    println!("  Device B now has {} memories", stats_b.total_memories);
+
+    // --- Stats ---
     println!("\n--- Memory Statistics ---");
     let stats = mem.stats()?;
     println!("  Total: {} memories", stats.total_memories);
