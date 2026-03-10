@@ -122,7 +122,8 @@ pub fn merge_snapshot(
 
             if needs_update {
                 let mut merged = local_record.clone();
-                merged.working_strength = merged.working_strength.max(remote_record.working_strength);
+                merged.working_strength =
+                    merged.working_strength.max(remote_record.working_strength);
                 merged.core_strength = merged.core_strength.max(remote_record.core_strength);
                 merged.importance = merged.importance.max(remote_record.importance);
                 // Merge access times (union, deduplicated by timestamp)
@@ -135,7 +136,9 @@ pub fn merge_snapshot(
                 times.sort();
                 merged.access_times = times;
                 // Keep the higher consolidation count
-                merged.consolidation_count = merged.consolidation_count.max(remote_record.consolidation_count);
+                merged.consolidation_count = merged
+                    .consolidation_count
+                    .max(remote_record.consolidation_count);
                 // Pinned if either side pinned
                 merged.pinned = merged.pinned || remote_record.pinned;
 

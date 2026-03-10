@@ -4,11 +4,16 @@ use chrono::Utc;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Type alias for memory merge/compression functions.
+pub type MergeFn = dyn Fn(&[&str]) -> String;
+
 use crate::config::MemoryConfig;
 use crate::models::{effective_strength, retrieval_activation, run_consolidation_cycle};
 use crate::retrieval::{self, RetrievalConfig};
 use crate::store::MemoryStore;
-use crate::types::{LayerStats, MemoryLayer, MemoryRecord, MemoryStats, MemoryType, RecallResult, TypeStats};
+use crate::types::{
+    LayerStats, MemoryLayer, MemoryRecord, MemoryStats, MemoryType, RecallResult, TypeStats,
+};
 
 /// Main interface to the Engram memory system.
 ///
@@ -30,9 +35,12 @@ impl Memory {
     /// # Arguments
     ///
     /// * `path` - Path to database file. Created if it doesn't exist.
-    ///           Use `:memory:` for in-memory (non-persistent) operation.
+    ///   Use `:memory:` for in-memory (non-persistent) operation.
     /// * `config` - MemoryConfig with tunable parameters. None = literature defaults.
-    pub fn new(path: &str, config: Option<MemoryConfig>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        path: &str,
+        config: Option<MemoryConfig>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let storage = if path == ":memory:" {
             MemoryStore::new::<std::path::PathBuf>(None)?
         } else {
@@ -227,7 +235,10 @@ impl Memory {
         for result in &results {
             self.storage.record_access(&result.record.id)?;
             // Meta-learning: track retrieval count
-            let entry = self.meta_stats.entry(result.record.id.clone()).or_insert((0, 0, 0));
+            let entry = self
+                .meta_stats
+                .entry(result.record.id.clone())
+                .or_insert((0, 0, 0));
             entry.0 += 1;
         }
 
@@ -258,7 +269,8 @@ impl Memory {
 
         // Decay Hebbian links
         if self.config.hebbian_enabled {
-            self.storage.decay_hebbian_links(self.config.hebbian_decay)?;
+            self.storage
+                .decay_hebbian_links(self.config.hebbian_decay)?;
         }
 
         // Meta-learning: adjust importance based on actual utility
@@ -279,7 +291,7 @@ impl Memory {
     pub fn compress(
         &mut self,
         similarity_threshold: f64,
-        merge_fn: Option<&dyn Fn(&[&str]) -> String>,
+        merge_fn: Option<&MergeFn>,
     ) -> Result<usize, Box<dyn std::error::Error>> {
         let all = self.storage.all()?;
         if all.len() < 2 {
@@ -326,7 +338,8 @@ impl Memory {
             };
 
             // Keep the strongest memory as the survivor
-            let survivor_idx = cluster.iter()
+            let survivor_idx = cluster
+                .iter()
                 .enumerate()
                 .max_by(|(_, a), (_, b)| {
                     let sa = a.working_strength + a.core_strength;
@@ -375,12 +388,13 @@ impl Memory {
             let now = Utc::now();
             let all = self.storage.all()?;
             for record in all {
-                if !record.pinned && effective_strength(&record, now) < threshold {
-                    if record.layer != MemoryLayer::Archive {
-                        let mut updated = record;
-                        updated.layer = MemoryLayer::Archive;
-                        self.storage.update(&updated)?;
-                    }
+                if !record.pinned
+                    && effective_strength(&record, now) < threshold
+                    && record.layer != MemoryLayer::Archive
+                {
+                    let mut updated = record;
+                    updated.layer = MemoryLayer::Archive;
+                    self.storage.update(&updated)?;
                 }
             }
         }
@@ -392,7 +406,11 @@ impl Memory {
     ///
     /// Detects positive/negative sentiment and applies reward modulation
     /// to recently accessed memories. Also updates meta-learning stats.
-    pub fn reward(&mut self, feedback: &str, recent_n: usize) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn reward(
+        &mut self,
+        feedback: &str,
+        recent_n: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let polarity = detect_feedback_polarity(feedback);
 
         if polarity == 0.0 {
@@ -410,12 +428,18 @@ impl Memory {
             if polarity > 0.0 {
                 record.working_strength += self.config.reward_magnitude * polarity;
                 record.working_strength = record.working_strength.min(2.0);
-                let entry = self.meta_stats.entry(record.id.clone()).or_insert((0, 0, 0));
+                let entry = self
+                    .meta_stats
+                    .entry(record.id.clone())
+                    .or_insert((0, 0, 0));
                 entry.1 += 1;
             } else {
                 record.working_strength *= 1.0 + polarity * 0.1;
                 record.working_strength = record.working_strength.max(0.0);
-                let entry = self.meta_stats.entry(record.id.clone()).or_insert((0, 0, 0));
+                let entry = self
+                    .meta_stats
+                    .entry(record.id.clone())
+                    .or_insert((0, 0, 0));
                 entry.2 += 1;
             }
             self.storage.update(&record)?;
@@ -474,7 +498,8 @@ impl Memory {
                     .map(|r| effective_strength(r, now))
                     .sum::<f64>()
                     / count as f64;
-                let avg_importance = records.iter().map(|r| r.importance).sum::<f64>() / count as f64;
+                let avg_importance =
+                    records.iter().map(|r| r.importance).sum::<f64>() / count as f64;
 
                 (
                     type_name,
@@ -491,7 +516,8 @@ impl Memory {
             .into_iter()
             .map(|(layer_name, records)| {
                 let count = records.len();
-                let avg_working = records.iter().map(|r| r.working_strength).sum::<f64>() / count as f64;
+                let avg_working =
+                    records.iter().map(|r| r.working_strength).sum::<f64>() / count as f64;
                 let avg_core = records.iter().map(|r| r.core_strength).sum::<f64>() / count as f64;
 
                 (
@@ -535,8 +561,11 @@ impl Memory {
     }
 
     /// Get Hebbian links for a specific memory.
-    pub fn hebbian_links(&self, memory_id: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        Ok(self.storage.get_hebbian_neighbors(memory_id)?)
+    pub fn hebbian_links(
+        &self,
+        memory_id: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        self.storage.get_hebbian_neighbors(memory_id)
     }
 
     /// Export all memories for sync (content-addressed snapshot).
@@ -545,7 +574,10 @@ impl Memory {
     }
 
     /// Import and merge a remote snapshot (CRDT union merge).
-    pub fn import_snapshot(&mut self, snapshot: &crate::sync::Snapshot) -> Result<crate::sync::MergeReport, Box<dyn std::error::Error>> {
+    pub fn import_snapshot(
+        &mut self,
+        snapshot: &crate::sync::Snapshot,
+    ) -> Result<crate::sync::MergeReport, Box<dyn std::error::Error>> {
         crate::sync::merge_snapshot(&mut self.storage, snapshot)
     }
 
@@ -555,7 +587,8 @@ impl Memory {
     /// get their importance boosted. Memories retrieved but negatively
     /// rewarded get suppressed.
     fn meta_learn(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let updates: Vec<(String, f64)> = self.meta_stats
+        let updates: Vec<(String, f64)> = self
+            .meta_stats
             .iter()
             .filter_map(|(id, (retrieved, positive, negative))| {
                 if *retrieved < 2 {
@@ -584,8 +617,8 @@ impl Memory {
 
     fn compute_confidence(&self, record: &MemoryRecord, activation: f64) -> f64 {
         let normalized_activation = (activation + 10.0) / 20.0;
-        let confidence = (normalized_activation.max(0.0).min(1.0) * 0.7) + (record.importance * 0.3);
-        confidence.max(0.0).min(1.0)
+        let confidence = (normalized_activation.clamp(0.0, 1.0) * 0.7) + (record.importance * 0.3);
+        confidence.clamp(0.0, 1.0)
     }
 }
 
@@ -595,7 +628,7 @@ fn default_merge(contents: &[&str]) -> String {
     let mut merged = Vec::new();
 
     for content in contents {
-        for sentence in content.split(|c: char| c == '.' || c == ';' || c == '\n') {
+        for sentence in content.split(['.', ';', '\n']) {
             let trimmed = sentence.trim();
             if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
                 merged.push(trimmed);
@@ -608,11 +641,13 @@ fn default_merge(contents: &[&str]) -> String {
 
 /// Jaccard similarity between two content strings (word-level).
 fn jaccard_similarity(a: &str, b: &str) -> f64 {
-    let words_a: std::collections::HashSet<&str> = a.split_whitespace()
+    let words_a: std::collections::HashSet<&str> = a
+        .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() >= 2)
         .collect();
-    let words_b: std::collections::HashSet<&str> = b.split_whitespace()
+    let words_b: std::collections::HashSet<&str> = b
+        .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() >= 2)
         .collect();
@@ -637,8 +672,25 @@ fn confidence_label(confidence: f64) -> String {
 
 fn detect_feedback_polarity(feedback: &str) -> f64 {
     let lower = feedback.to_lowercase();
-    let positive = ["good", "great", "excellent", "correct", "right", "yes", "nice", "perfect"];
-    let negative = ["bad", "wrong", "incorrect", "no", "error", "mistake", "poor"];
+    let positive = [
+        "good",
+        "great",
+        "excellent",
+        "correct",
+        "right",
+        "yes",
+        "nice",
+        "perfect",
+    ];
+    let negative = [
+        "bad",
+        "wrong",
+        "incorrect",
+        "no",
+        "error",
+        "mistake",
+        "poor",
+    ];
 
     let pos_count = positive.iter().filter(|&w| lower.contains(w)).count();
     let neg_count = negative.iter().filter(|&w| lower.contains(w)).count();

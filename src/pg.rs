@@ -6,7 +6,7 @@
 #![cfg(feature = "postgres")]
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{postgres::PgRow, PgPool, Row};
 
 use crate::types::{MemoryLayer, MemoryRecord, MemoryType};
 
@@ -85,7 +85,13 @@ impl PgStore {
 
     pub async fn add(&self, record: &MemoryRecord) -> Result<(), sqlx::Error> {
         let embedding_str = record.embedding.as_ref().map(|v| {
-            format!("[{}]", v.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(","))
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         });
 
         sqlx::query(
@@ -156,7 +162,13 @@ impl PgStore {
 
     pub async fn update(&self, record: &MemoryRecord) -> Result<(), sqlx::Error> {
         let embedding_str = record.embedding.as_ref().map(|v| {
-            format!("[{}]", v.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(","))
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         });
 
         sqlx::query(
@@ -225,10 +237,7 @@ impl PgStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<MemoryRecord>, sqlx::Error> {
-        let tsquery = query
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" | ");
+        let tsquery = query.split_whitespace().collect::<Vec<_>>().join(" | ");
 
         let rows = sqlx::query(
             r#"SELECT *, ts_rank(ts_content, to_tsquery('english', $1)) AS rank
@@ -278,7 +287,11 @@ impl PgStore {
     ) -> Vec<(String, f32)> {
         let emb_str = format!(
             "[{}]",
-            query_embedding.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",")
+            query_embedding
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         );
 
         // pgvector: 1 - cosine_distance = cosine_similarity
@@ -310,10 +323,7 @@ impl PgStore {
 
     // --- Hebbian ---
 
-    pub async fn get_hebbian_neighbors(
-        &self,
-        memory_id: &str,
-    ) -> Result<Vec<String>, sqlx::Error> {
+    pub async fn get_hebbian_neighbors(&self, memory_id: &str) -> Result<Vec<String>, sqlx::Error> {
         let rows = sqlx::query(
             r#"SELECT target_id FROM engram_hebbian_links WHERE source_id = $1 AND weight > 0.1
                UNION
@@ -323,10 +333,15 @@ impl PgStore {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.iter().map(|r| {
-            let col: String = r.try_get("target_id").unwrap_or_else(|_| r.get("source_id"));
-            col
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let col: String = r
+                    .try_get("target_id")
+                    .unwrap_or_else(|_| r.get("source_id"));
+                col
+            })
+            .collect())
     }
 
     pub async fn record_coactivation(
@@ -358,12 +373,11 @@ impl PgStore {
     }
 
     pub async fn decay_hebbian_links(&self, factor: f64) -> Result<usize, sqlx::Error> {
-        let result = sqlx::query(
-            "UPDATE engram_hebbian_links SET weight = weight * $1 WHERE weight > 0.01",
-        )
-        .bind(factor)
-        .execute(&self.pool)
-        .await?;
+        let result =
+            sqlx::query("UPDATE engram_hebbian_links SET weight = weight * $1 WHERE weight > 0.01")
+                .bind(factor)
+                .execute(&self.pool)
+                .await?;
 
         // Clean up near-zero links
         sqlx::query("DELETE FROM engram_hebbian_links WHERE weight < 0.01")
@@ -381,7 +395,10 @@ impl PgStore {
 
 // --- Row conversion ---
 
-fn row_to_record(row: &PgRow, access_times: Vec<DateTime<Utc>>) -> Result<MemoryRecord, sqlx::Error> {
+fn row_to_record(
+    row: &PgRow,
+    access_times: Vec<DateTime<Utc>>,
+) -> Result<MemoryRecord, sqlx::Error> {
     let memory_type_str: String = row.get("memory_type");
     let layer_str: String = row.get("layer");
 

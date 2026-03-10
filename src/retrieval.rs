@@ -67,10 +67,26 @@ pub struct ScoreComponents {
 
 /// Noise words/patterns that indicate low-value content.
 const NOISE_PATTERNS: &[&str] = &[
-    "ok", "okay", "sure", "yes", "no", "thanks", "thank you",
-    "hi", "hello", "hey", "bye", "goodbye",
-    "hmm", "hm", "um", "uh", "ah",
-    "got it", "sounds good", "makes sense",
+    "ok",
+    "okay",
+    "sure",
+    "yes",
+    "no",
+    "thanks",
+    "thank you",
+    "hi",
+    "hello",
+    "hey",
+    "bye",
+    "goodbye",
+    "hmm",
+    "hm",
+    "um",
+    "uh",
+    "ah",
+    "got it",
+    "sounds good",
+    "makes sense",
 ];
 
 /// Check if content is noise (greetings, acknowledgments, etc.).
@@ -88,10 +104,7 @@ pub fn is_noise(content: &str) -> bool {
 ///
 /// Where k=60 (standard), rank_r(d) is the rank of document d in ranked list r.
 /// Documents not present in a list get rank = list_length + 1.
-pub fn rrf_fuse(
-    ranked_lists: &[Vec<String>],
-    k: f64,
-) -> Vec<(String, f64)> {
+pub fn rrf_fuse(ranked_lists: &[Vec<String>], k: f64) -> Vec<(String, f64)> {
     let mut scores: HashMap<String, f64> = HashMap::new();
 
     for list in ranked_lists {
@@ -124,8 +137,14 @@ pub fn mmr_select(
     let mut remaining: Vec<usize> = (0..candidates.len()).collect();
 
     // Normalize scores to [0, 1] for fair MMR comparison
-    let max_score = candidates.iter().map(|c| c.score).fold(f64::NEG_INFINITY, f64::max);
-    let min_score = candidates.iter().map(|c| c.score).fold(f64::INFINITY, f64::min);
+    let max_score = candidates
+        .iter()
+        .map(|c| c.score)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_score = candidates
+        .iter()
+        .map(|c| c.score)
+        .fold(f64::INFINITY, f64::min);
     let score_range = (max_score - min_score).max(1e-10);
 
     while selected.len() < limit && !remaining.is_empty() {
@@ -163,11 +182,13 @@ pub fn mmr_select(
 
 /// Jaccard similarity between two content strings (word-level).
 fn content_similarity(a: &str, b: &str) -> f64 {
-    let words_a: HashSet<&str> = a.split_whitespace()
+    let words_a: HashSet<&str> = a
+        .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() >= 2)
         .collect();
-    let words_b: HashSet<&str> = b.split_whitespace()
+    let words_b: HashSet<&str> = b
+        .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() >= 2)
         .collect();
@@ -251,11 +272,13 @@ pub fn retrieve(
     }
 
     // Build keyword rank map
-    let keyword_ranks: HashMap<&str, usize> = fts_ids.iter()
+    let keyword_ranks: HashMap<&str, usize> = fts_ids
+        .iter()
         .enumerate()
         .map(|(i, id)| (id.as_str(), i + 1))
         .collect();
-    let vector_ranks: HashMap<&str, usize> = vec_ids.iter()
+    let vector_ranks: HashMap<&str, usize> = vec_ids
+        .iter()
         .enumerate()
         .map(|(i, id)| (id.as_str(), i + 1))
         .collect();
@@ -283,7 +306,8 @@ pub fn retrieve(
         let final_score = if query_embedding.is_some() {
             config.cognitive_weight * cog_norm
                 + config.semantic_weight * sem_score
-                + config.keyword_weight * rrf_score / rrf_ranked[0].1.max(1e-10) // normalize RRF
+                + config.keyword_weight * rrf_score / rrf_ranked[0].1.max(1e-10)
+        // normalize RRF
         } else {
             // No embeddings: blend cognitive with RRF keyword score
             0.6 * cog_norm + 0.4 * rrf_score / rrf_ranked[0].1.max(1e-10)
@@ -303,7 +327,11 @@ pub fn retrieve(
     }
 
     // Sort by score descending before MMR
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // 4. MMR diversity selection
     let selected = mmr_select(&candidates, limit, config.mmr_lambda);
@@ -329,10 +357,7 @@ mod tests {
 
     #[test]
     fn test_content_similarity() {
-        let sim = content_similarity(
-            "rust programming language",
-            "rust programming tutorial",
-        );
+        let sim = content_similarity("rust programming language", "rust programming tutorial");
         assert!(sim > 0.3); // "rust" and "programming" overlap
 
         let sim2 = content_similarity("hello world", "cooking recipes");
@@ -379,9 +404,17 @@ mod tests {
         };
 
         let candidates = vec![
-            make("1", "rust is a systems programming language for safety", 0.9),
-            make("2", "rust is a systems programming language for speed", 0.85), // near-dup (6/7 overlap)
-            make("3", "cooking italian pasta recipes at home", 0.7),             // diverse
+            make(
+                "1",
+                "rust is a systems programming language for safety",
+                0.9,
+            ),
+            make(
+                "2",
+                "rust is a systems programming language for speed",
+                0.85,
+            ), // near-dup (6/7 overlap)
+            make("3", "cooking italian pasta recipes at home", 0.7), // diverse
         ];
 
         let selected = mmr_select(&candidates, 2, 0.5);

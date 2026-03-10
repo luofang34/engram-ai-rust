@@ -27,7 +27,12 @@ pub trait MemoryBackend: Send {
     // --- Search ---
     fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>, Self::Error>;
     fn search_by_type(&self, memory_type: MemoryType) -> Result<Vec<MemoryRecord>, Self::Error>;
-    fn search_vector(&self, query_embedding: &[f32], limit: usize, min_score: f32) -> Vec<(String, f32)>;
+    fn search_vector(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> Vec<(String, f32)>;
 
     // --- Hebbian ---
     fn get_hebbian_neighbors(&self, memory_id: &str) -> Result<Vec<String>, Self::Error>;
@@ -53,12 +58,25 @@ pub trait AsyncMemoryBackend: Send {
     async fn record_access(&mut self, id: &str) -> Result<(), Self::Error>;
     async fn get_access_times(&self, id: &str) -> Result<Vec<DateTime<Utc>>, Self::Error>;
 
-    async fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>, Self::Error>;
-    async fn search_by_type(&self, memory_type: MemoryType) -> Result<Vec<MemoryRecord>, Self::Error>;
-    async fn search_vector(&self, query_embedding: &[f32], limit: usize, min_score: f32) -> Vec<(String, f32)>;
+    async fn search_fts(&self, query: &str, limit: usize)
+        -> Result<Vec<MemoryRecord>, Self::Error>;
+    async fn search_by_type(
+        &self,
+        memory_type: MemoryType,
+    ) -> Result<Vec<MemoryRecord>, Self::Error>;
+    async fn search_vector(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> Vec<(String, f32)>;
 
     async fn get_hebbian_neighbors(&self, memory_id: &str) -> Result<Vec<String>, Self::Error>;
-    async fn record_coactivation(&mut self, ids: &[String], min_weight: f64) -> Result<(), Self::Error>;
+    async fn record_coactivation(
+        &mut self,
+        ids: &[String],
+        min_weight: f64,
+    ) -> Result<(), Self::Error>;
     async fn decay_hebbian_links(&mut self, factor: f64) -> Result<usize, Self::Error>;
 
     async fn flush(&self) -> Result<(), Self::Error>;

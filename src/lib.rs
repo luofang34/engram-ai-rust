@@ -57,15 +57,15 @@
 //! let config = MemoryConfig::researcher();
 //! ```
 
+pub mod backend;
 pub mod config;
 pub mod memory;
 pub mod models;
-pub mod backend;
+#[cfg(feature = "postgres")]
+pub mod pg;
 pub mod retrieval;
 pub mod store;
 pub mod sync;
-#[cfg(feature = "postgres")]
-pub mod pg;
 pub mod types;
 
 pub use config::MemoryConfig;

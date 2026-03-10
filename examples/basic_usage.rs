@@ -97,16 +97,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- Cross-device sync ---
     println!("\n--- Cross-device sync demo ---");
     let mut device_b = Memory::new(":memory:", None)?;
-    device_b.add("Remote device note", MemoryType::Episodic, Some(0.4), None, None)?;
+    device_b.add(
+        "Remote device note",
+        MemoryType::Episodic,
+        Some(0.4),
+        None,
+        None,
+    )?;
 
     // Export from main, import into device B
     let snapshot = mem.export_snapshot()?;
     let bytes = snapshot.to_bytes()?;
-    println!("  Snapshot: {} bytes ({} memories)", bytes.len(), snapshot.memories.len());
+    println!(
+        "  Snapshot: {} bytes ({} memories)",
+        bytes.len(),
+        snapshot.memories.len()
+    );
 
     let restored = engramai::sync::Snapshot::from_bytes(&bytes)?;
     let report = device_b.import_snapshot(&restored)?;
-    println!("  Merged: {} added, {} updated, {} skipped", report.added, report.updated, report.skipped);
+    println!(
+        "  Merged: {} added, {} updated, {} skipped",
+        report.added, report.updated, report.skipped
+    );
 
     let stats_b = device_b.stats()?;
     println!("  Device B now has {} memories", stats_b.total_memories);

@@ -9,11 +9,23 @@ fn test_basic_workflow() {
 
     // Add memories
     let id1 = mem
-        .add("potato prefers action", MemoryType::Relational, Some(0.7), None, None)
+        .add(
+            "potato prefers action",
+            MemoryType::Relational,
+            Some(0.7),
+            None,
+            None,
+        )
         .unwrap();
 
     let _id2 = mem
-        .add("Use moltbook.com for API", MemoryType::Procedural, Some(0.8), None, None)
+        .add(
+            "Use moltbook.com for API",
+            MemoryType::Procedural,
+            Some(0.8),
+            None,
+            None,
+        )
         .unwrap();
 
     // Recall
@@ -40,11 +52,23 @@ fn test_hebbian_links() {
     let mut mem = Memory::new(db_path.to_str().unwrap(), None).unwrap();
 
     let id1 = mem
-        .add("Python is a programming language", MemoryType::Factual, None, None, None)
+        .add(
+            "Python is a programming language",
+            MemoryType::Factual,
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let id2 = mem
-        .add("Python has dynamic typing", MemoryType::Factual, None, None, None)
+        .add(
+            "Python has dynamic typing",
+            MemoryType::Factual,
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     // Recall them together multiple times to form Hebbian link
@@ -132,14 +156,26 @@ fn test_noise_filtering() {
     let mut mem = Memory::new(":memory:", None).unwrap();
 
     // Noise should be silently rejected
-    let id1 = mem.add("ok", MemoryType::Factual, None, None, None).unwrap();
+    let id1 = mem
+        .add("ok", MemoryType::Factual, None, None, None)
+        .unwrap();
     assert!(id1.is_empty());
 
-    let id2 = mem.add("thanks", MemoryType::Factual, None, None, None).unwrap();
+    let id2 = mem
+        .add("thanks", MemoryType::Factual, None, None, None)
+        .unwrap();
     assert!(id2.is_empty());
 
     // Real content should be accepted
-    let id3 = mem.add("Rust uses ownership for memory safety", MemoryType::Factual, None, None, None).unwrap();
+    let id3 = mem
+        .add(
+            "Rust uses ownership for memory safety",
+            MemoryType::Factual,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
     assert!(!id3.is_empty());
 
     let stats = mem.stats().unwrap();
@@ -150,9 +186,30 @@ fn test_noise_filtering() {
 fn test_retrieval_pipeline_rrf() {
     let mut mem = Memory::new(":memory:", None).unwrap();
 
-    mem.add("Rust is a systems programming language", MemoryType::Factual, None, None, None).unwrap();
-    mem.add("Python is great for data science", MemoryType::Factual, None, None, None).unwrap();
-    mem.add("Cooking pasta requires boiling water", MemoryType::Procedural, None, None, None).unwrap();
+    mem.add(
+        "Rust is a systems programming language",
+        MemoryType::Factual,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    mem.add(
+        "Python is great for data science",
+        MemoryType::Factual,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    mem.add(
+        "Cooking pasta requires boiling water",
+        MemoryType::Procedural,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     // RRF pipeline should still return relevant results
     let results = mem.recall("Rust programming", 3, None, None).unwrap();
@@ -175,7 +232,14 @@ fn test_retrieval_config_customization() {
     };
     mem.set_retrieval_config(config);
 
-    mem.add("Rust is a systems programming language for safety and speed", MemoryType::Factual, None, None, None).unwrap();
+    mem.add(
+        "Rust is a systems programming language for safety and speed",
+        MemoryType::Factual,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let results = mem.recall("Rust", 3, None, None).unwrap();
     assert!(!results.is_empty());
 }
@@ -187,11 +251,35 @@ fn test_sync_cross_device() {
     let mut device_b = Memory::new(":memory:", None).unwrap();
 
     // Device A adds memories
-    device_a.add("User prefers dark mode", MemoryType::Relational, Some(0.6), None, None).unwrap();
-    device_a.add("Project uses PostgreSQL", MemoryType::Factual, Some(0.5), None, None).unwrap();
+    device_a
+        .add(
+            "User prefers dark mode",
+            MemoryType::Relational,
+            Some(0.6),
+            None,
+            None,
+        )
+        .unwrap();
+    device_a
+        .add(
+            "Project uses PostgreSQL",
+            MemoryType::Factual,
+            Some(0.5),
+            None,
+            None,
+        )
+        .unwrap();
 
     // Device B adds different memories
-    device_b.add("Meeting at 3pm tomorrow", MemoryType::Episodic, Some(0.4), None, None).unwrap();
+    device_b
+        .add(
+            "Meeting at 3pm tomorrow",
+            MemoryType::Episodic,
+            Some(0.4),
+            None,
+            None,
+        )
+        .unwrap();
 
     // Export from A, import into B
     let snapshot_a = device_a.export_snapshot().unwrap();
@@ -215,7 +303,15 @@ fn test_sync_cross_device() {
 #[test]
 fn test_sync_idempotent() {
     let mut device_a = Memory::new(":memory:", None).unwrap();
-    device_a.add("Persistent memory", MemoryType::Factual, Some(0.5), None, None).unwrap();
+    device_a
+        .add(
+            "Persistent memory",
+            MemoryType::Factual,
+            Some(0.5),
+            None,
+            None,
+        )
+        .unwrap();
 
     let snapshot = device_a.export_snapshot().unwrap();
 
@@ -231,7 +327,14 @@ fn test_sync_idempotent() {
 #[test]
 fn test_sync_serialization_roundtrip() {
     let mut mem = Memory::new(":memory:", None).unwrap();
-    mem.add("Test memory for sync", MemoryType::Factual, Some(0.5), None, None).unwrap();
+    mem.add(
+        "Test memory for sync",
+        MemoryType::Factual,
+        Some(0.5),
+        None,
+        None,
+    )
+    .unwrap();
 
     let snapshot = mem.export_snapshot().unwrap();
 
@@ -247,7 +350,15 @@ fn test_sync_serialization_roundtrip() {
 fn test_meta_learning() {
     let mut mem = Memory::new(":memory:", None).unwrap();
 
-    let _id = mem.add("Important fact about Rust ownership", MemoryType::Factual, Some(0.5), None, None).unwrap();
+    let _id = mem
+        .add(
+            "Important fact about Rust ownership",
+            MemoryType::Factual,
+            Some(0.5),
+            None,
+            None,
+        )
+        .unwrap();
 
     // Retrieve multiple times
     for _ in 0..5 {
@@ -273,17 +384,21 @@ fn test_add_with_embedding() {
     let mut mem = Memory::new(":memory:", None).unwrap();
 
     let embedding = vec![0.1, 0.2, 0.3, 0.4, 0.5];
-    let id = mem.add_with_embedding(
-        "Vector-indexed memory",
-        MemoryType::Factual,
-        Some(0.6),
-        None,
-        None,
-        embedding.clone(),
-    ).unwrap();
+    let id = mem
+        .add_with_embedding(
+            "Vector-indexed memory",
+            MemoryType::Factual,
+            Some(0.6),
+            None,
+            None,
+            embedding.clone(),
+        )
+        .unwrap();
     assert!(!id.is_empty());
 
     // Can retrieve via hybrid recall with embedding
-    let results = mem.recall_hybrid("vector", 3, None, None, Some(&[0.1, 0.2, 0.3, 0.4, 0.5])).unwrap();
+    let results = mem
+        .recall_hybrid("vector", 3, None, None, Some(&[0.1, 0.2, 0.3, 0.4, 0.5]))
+        .unwrap();
     assert!(!results.is_empty());
 }

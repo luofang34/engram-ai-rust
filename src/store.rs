@@ -12,14 +12,12 @@ use crate::types::{MemoryRecord, MemoryType};
 
 /// Stopwords filtered from the inverted index.
 const STOPWORDS: &[&str] = &[
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-    "should", "may", "might", "must", "can", "could", "of", "in", "to",
-    "for", "with", "on", "at", "by", "from", "as", "into", "through",
-    "during", "before", "after", "and", "but", "or", "nor", "not", "so",
-    "yet", "both", "either", "neither", "it", "its", "this", "that",
-    "these", "those", "i", "me", "my", "we", "our", "you", "your",
-    "he", "him", "his", "she", "her", "they", "them", "their",
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "shall", "should", "may", "might", "must", "can",
+    "could", "of", "in", "to", "for", "with", "on", "at", "by", "from", "as", "into", "through",
+    "during", "before", "after", "and", "but", "or", "nor", "not", "so", "yet", "both", "either",
+    "neither", "it", "its", "this", "that", "these", "those", "i", "me", "my", "we", "our", "you",
+    "your", "he", "him", "his", "she", "her", "they", "them", "their",
 ];
 
 /// Snapshot format for disk persistence.
@@ -107,12 +105,23 @@ impl MemoryStore {
     }
 
     /// Get access timestamps for a memory.
-    pub fn get_access_times(&self, id: &str) -> Result<Vec<DateTime<Utc>>, Box<dyn std::error::Error>> {
-        Ok(self.memories.get(id).map(|r| r.access_times.clone()).unwrap_or_default())
+    pub fn get_access_times(
+        &self,
+        id: &str,
+    ) -> Result<Vec<DateTime<Utc>>, Box<dyn std::error::Error>> {
+        Ok(self
+            .memories
+            .get(id)
+            .map(|r| r.access_times.clone())
+            .unwrap_or_default())
     }
 
     /// Full-text search using the inverted index.
-    pub fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>, Box<dyn std::error::Error>> {
+    pub fn search_fts(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryRecord>, Box<dyn std::error::Error>> {
         let tokens = tokenize(query);
         if tokens.is_empty() {
             return Ok(vec![]);
@@ -142,15 +151,23 @@ impl MemoryStore {
     }
 
     /// Search memories by type.
-    pub fn search_by_type(&self, memory_type: MemoryType) -> Result<Vec<MemoryRecord>, Box<dyn std::error::Error>> {
-        Ok(self.memories.values()
+    pub fn search_by_type(
+        &self,
+        memory_type: MemoryType,
+    ) -> Result<Vec<MemoryRecord>, Box<dyn std::error::Error>> {
+        Ok(self
+            .memories
+            .values()
             .filter(|r| r.memory_type == memory_type)
             .cloned()
             .collect())
     }
 
     /// Get Hebbian neighbor IDs for a memory.
-    pub fn get_hebbian_neighbors(&self, memory_id: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    pub fn get_hebbian_neighbors(
+        &self,
+        memory_id: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let mut neighbors = Vec::new();
         for ((a, b), strength) in &self.hebbian_links {
             if *strength > 0.0 {
@@ -216,7 +233,10 @@ impl MemoryStore {
     }
 
     /// Decay all Hebbian links by a factor.
-    pub fn decay_hebbian_links(&mut self, factor: f64) -> Result<usize, Box<dyn std::error::Error>> {
+    pub fn decay_hebbian_links(
+        &mut self,
+        factor: f64,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
         // Decay all positive links
         for strength in self.hebbian_links.values_mut() {
             if *strength > 0.0 {
@@ -267,7 +287,8 @@ impl MemoryStore {
         if let Some(ref path) = self.path {
             let snapshot = StoreSnapshot {
                 memories: self.memories.values().cloned().collect(),
-                hebbian_links: self.hebbian_links
+                hebbian_links: self
+                    .hebbian_links
                     .iter()
                     .map(|((a, b), s)| (a.clone(), b.clone(), *s))
                     .collect(),
@@ -304,7 +325,7 @@ impl MemoryStore {
         for token in tokens {
             self.inverted_index
                 .entry(token)
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(record.id.clone());
         }
     }
@@ -380,8 +401,12 @@ mod tests {
     #[test]
     fn test_fts() {
         let mut store = MemoryStore::new::<PathBuf>(None).unwrap();
-        store.add(&make_record("1", "rust programming language")).unwrap();
-        store.add(&make_record("2", "python scripting language")).unwrap();
+        store
+            .add(&make_record("1", "rust programming language"))
+            .unwrap();
+        store
+            .add(&make_record("2", "python scripting language"))
+            .unwrap();
         store.add(&make_record("3", "cooking recipes")).unwrap();
 
         let results = store.search_fts("programming rust", 10).unwrap();
